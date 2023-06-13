@@ -1,0 +1,479 @@
+Microsoft (R) Macro Assembler Version 6.14.8444		    06/04/23 16:58:40
+Signaling.asm						     Page 1 - 1
+
+
+				.386
+				;Задайте объём ПЗУ в байтах
+ = 1000				RomSize    EQU   1000h                   ;4Кб для программного кода
+
+ = 0032				           NMax = 50                     ;Число повторений при вводе с кнопки
+
+ = 00FE				           SensFirePort1 = 00FEh         ;Порт ввода состояния датчиков пожара - этаж 1 
+ = 00FD				           SensFirePort2 = 00FDh         ;Порт ввода состояния датчиков пожара - этаж 2
+ = 00FB				           SensBrechPort1 = 00FBh        ;Порт ввода состояния датчиков взлома - этаж 1 
+ = 00F7				           SensBrechPort2 = 00F7h        ;Порт ввода состояния датчиков взлома - этаж 2
+
+ = 00EF				           SecureBtnPort1 = 00EFh        ;Порт ввода кнопок постановки комнат под охрану - этаж 1 
+ = 00DF				           SecureBtnPort2 = 00DFh        ;Порт ввода кнопок постановки комнат под охрану - этаж 2
+						   
+ = 00BF				           CtrlBtnPort = 00BFh           ;Порт ввода с кнопок управления индикацией
+
+ = 00EF				           RoomIndPort1 = 00EFh          ;Адрес 1-го порта вывода для двоичных индикаторов - этаж 1
+ = 00DF				           RoomIndPort2 = 00DFh          ;Адрес 2-го порта вывода для двоичных индикаторов - этаж 2 
+
+ = 00BF				           CtrlIndPort = 00BFh           ;Порт управления звонком и индикаторами режимов
+
+ = 0014				           AlarmTime =  20               ;Длительность включения звонка
+ = 0014				           PulseTime = 20                ;Длительность включения при мигании индикаторов     
+ = 0014				           PauseTime = 20                ;Длительность паузы при мигании индикаторов
+
+ 0000				Data       SEGMENT use16 AT 0040h 
+				;Здесь размещаются описания переменных
+
+ 0000 00			           AlarmFlag  db ?               ;Флаг управления звонком (;Флаг общей тревоги)
+ 0001 00			           IndFlag db ?                  ;Флаг формирования свечения индикаторов всех охраняемых комнат и комнат где 
+ 0002 00			           FadeFlag db ?                 ;Флаг формирования свечения индикаторов охраняемых комнат в которых не сработали датчики  
+
+ 0003  0002 [			           SensFireStatus  db 2 dup (?)  ;Состояние датчиков пожара
+        00
+       ]
+ 0005  0002 [			           SensBreachStatus  db 2 dup (?);Состояние датчиков взлома
+        00
+       ]
+ 0007  0002 [			           SecureRoomBtn db 2 dup (?)    ;Состояние кнопок постановки комнат под охрану
+        00
+       ]
+ 0009 00			           CtrlBtnStatus db ?            ;Состояние кнопок управления индикацией и звонком - биты 0, 1, 2, 3 
+								
+ 000A  0002 [			           SecureOrFireStatus db 2 dup (?)    ;Комнаты, находящиеся под охраной или комнаты в которых сработали датчики пожара      
+        00
+       ]
+ 000C  0002 [			           BreachOrFireStatus db 2 dup (?)    ;Комнаты в которых сработали датчики 1 этаж (мл. байт) и 2 этаж (ст. байт)
+        00
+       ]
+ 000E  0002 [			           SecureAndBreachStatus db 2 dup (?) ;Комнаты находящиеся под охраной, в которых сработали датчики взлома
+        00
+       ]
+				      
+ 0010 0000			           CountAlarm dw ?               ;Длительность включения тревоги
+ 0012 0000			           CountPause dw ?               ;Длительность паузы при мигании индикаторов
+ 0014 0000			           CountPulse dw ?               ;Длительность включения при мигании индикаторов       
+				        
+ 0016				Data       ENDS
+
+				;Задайте необходимый адрес стека
+ 0000				Stk        SEGMENT use16 AT 60h 
+				;Задайте необходимый размер стека
+ 0000  0020 [			           dw    32 dup (?)
+        0000
+       ]
+ 0040				StkTop     Label Word
+ 0040				Stk        ENDS
+
+ 0000				InitData   SEGMENT use16
+ 0000				InitDataStart:
+				;Здесь размещаются описания констант
+ 0000				InitDataEnd:
+ 0000				InitData   ENDS
+
+ 0000				Code       SEGMENT use16
+				       ASSUME cs:Code,ds:Data,ss:Stk
+				;Здесь размещаются описания программных модулей 
+				               
+ 0000				FuncPrep Proc 
+				          
+ 0000  C7 06 0007 R 0000	           mov word ptr SecureRoomBtn,0        ;Вначале все кнопки не нажаты
+ 0006  C7 06 0003 R 0000	           mov word ptr SensFireStatus,0       ;Вначале все датчики пожара не активны 
+ 000C  C7 06 0005 R 0000	           mov word ptr SensBreachStatus,0     ;Вначале все датчики взлома не активны 
+ 0012  C7 06 000A R 0000	           mov word ptr SecureOrFireStatus,0   ;все комнаты в порядке
+ 0018  C7 06 000C R 0000	           mov word ptr BreachOrFireStatus, 0 
+ 001E  C7 06 000E R 0000	           mov word ptr SecureAndBreachStatus, 0
+				             
+ 0024  C6 06 0000 R 00		           mov AlarmFlag,0               ;Флаг управления звонком     
+ 0029  C6 06 0001 R FF		           mov IndFlag, 0FFh             ;Флаг формирования интервала 1 установлен
+ 002E  C6 06 0002 R 00		           mov FadeFlag,0                ;Флаг формирования интервала 2 сброшен
+
+ 0033  C7 06 0010 R 0014	           mov CountAlarm, AlarmTime     ;Длительность включения звонка
+ 0039  C7 06 0012 R 0014	           mov CountPause, PauseTime     ;Длительность паузы при мигании индикаторов
+ 003F  C7 06 0014 R 0014	           mov CountPulse, PulseTime     ;Длительность включения при мигании индикаторов 
+						   
+ 0045  E8 0001			           call Flashing                 ;Сигнализация начала работы устройства
+						   
+ 0048  C3			           ret
+ 0049				FuncPrep Endp
+
+ 0049				Flashing PROC 
+				;Выключить на короткое время звонок и сигнал на пульт пожарной охраны
+
+ 0049  B0 FF			           mov al, 0FFh
+ 004B  E6 EF			           out RoomIndPort1, al
+ 004D  E6 DF			           out RoomIndPort2, al
+ 004F  E6 BF			           out CtrlIndPort, al
+							
+ 0051  BA 0010			           mov dx, 0010h
+ 0054  BB 0000			           mov bx, 0000h 
+ 0057				DDelay0:
+ 0057  83 EB 01			           sub bx, 1  
+ 005A  83 DA 00			           sbb dx, 0   
+ 005D  8B F3			           mov si, bx
+ 005F  0B F2			           or si, dx
+ 0061  75 F4			           jnz DDelay0
+							
+ 0063  B0 00			           mov al, 0
+ 0065  E6 EF			           out RoomIndPort1, al
+ 0067  E6 DF			           out RoomIndPort2, al
+ 0069  E6 BF			           out CtrlIndPort, al
+										
+ 006B  C3			           ret
+ 006C				Flashing ENDP
+				          
+				;Подмодуль "Гашение дребезга кнопок"
+ 006C				VibrDelete  PROC  NEAR
+ 006C  8A E0			vd1:       mov   ah,al                   ;Сохранение исходного состояния
+ 006E  B1 00			           mov   cl,0                    ;Сброс счётчика повторений
+ 0070  EC			vd2:       in    al,dx                   ;Ввод текущего состояния
+ 0071  38 C4			           cmp   ah,al                   ;Текущее состояние=исходному?
+ 0073  75 F7			           jnz   vd1                     ;Переход, если нет
+ 0075  FE C1			           inc   cl                      ;Инкремент счётчика повторений
+ 0077  80 F9 32			           cmp   cl,NMax                 ;Конец дребезга?
+ 007A  75 F4			           jnz   vd2                     ;Переход, если нет
+ 007C  8A C4			           mov   al,ah                   ;Восстановление местоположения данных
+				           
+ 007E  C3			           ret
+ 007F				VibrDelete  ENDP
+
+ 007F				SecureButtonsInput Proc
+				;ввод состояния кнопок постановки комнат под охрану 
+ 007F  8D 1E 0007 R		           lea bx,SecureRoomBtn          ;Массив состояния кнопок
+ 0083  BA 00EF			           mov dx,SecureBtnPort1
+ 0086  EC			           in al,dx	                     ;Ввод из порта
+ 0087  E8 FFE2			           call	VibrDelete               ;Гашение дребезга
+ 008A  F6 D0			           not al
+ 008C  88 07			           mov [bx], al                  ;Сохранить состояние кнопок постановки комнат под охрану - этаж 1
+				           
+ 008E  BA 00DF			           mov dx,SecureBtnPort2
+ 0091  EC			           in	al,dx	                 ;Ввод из порта
+ 0092  E8 FFD7			           call	VibrDelete               ;Гашение дребезга
+ 0095  F6 D0			           not al
+ 0097  88 47 01			           mov [bx+1], al                ;Сохранить состояние кнопок постановки комнат под охрану - этаж 2
+				           
+ 009A  C3			           ret
+ 009B				SecureButtonsInput endp
+
+ 009B				CtrlBtnInput Proc
+				;ввод состояния кнопок управления индикацией       
+ 009B  BA 00BF			           mov dx,CtrlBtnPort
+ 009E  EC			           in	al,dx                    ;Ввод из порта
+ 009F  E8 FFCA			           call	VibrDelete               ;Гашение дребезга
+ 00A2  A2 0009 R		           mov  CtrlBtnStatus, al        ;Сохранить состояние кнопок 
+				           
+ 00A5  C3			           ret          
+ 00A6				CtrlBtnInput Endp
+
+ 00A6				SensBreachInput Proc ;ввод с датчиков взлома
+ 00A6  8D 36 0005 R		           lea si,SensBreachStatus       ;Массив состояния датчиков
+						   
+ 00AA  BA 00FB			           mov dx,SensBrechPort1 ;SensBrechPort1 - Адрес порта ввода (этаж 1)
+ 00AD  EC			           in	al,dx                    ;Ввод из порта		   
+ 00AE  E8 FFBB			           call	VibrDelete               ;Гашение дребезга
+ 00B1  F6 D0			           not al
+ 00B3  88 04			           mov [si], al                  ;Сохранить состояние  датчиков взлома - этаж 1
+				                     
+ 00B5  BA 00F7			           mov dx,SensBrechPort2         ;SensBrechPort2 - Адрес порта ввода (этаж 2)
+ 00B8  EC			           in	al,dx	                 ;Ввод из порта
+ 00B9  E8 FFB0			           call	VibrDelete               ;Гашение дребезга
+ 00BC  F6 D0			           not al
+ 00BE  88 44 01			           mov [si+1], al                ;Сохранить состояние  датчиков взлома - этаж 2
+				           
+ 00C1  A1 0005 R		           mov ax, Word ptr SensBreachStatus
+
+ 00C4  C3			           ret
+ 00C5				SensBreachInput endp
+
+ 00C5				SensFireInput Proc ;ввод с датчиков пожара
+ 00C5  8D 36 0003 R		           lea si,SensFireStatus         ;Массив состояния датчиков
+ 00C9  BA 00FE			           mov dx,SensFirePort1          ;SensFirePort1 - Адрес порта ввода (этаж 1)
+ 00CC  EC			           in	al,dx                    ;Ввод из порта		   
+ 00CD  E8 FF9C			           call	VibrDelete               ;Гашение дребезга
+ 00D0  F6 D0			           not al
+ 00D2  88 04			           mov [si], al                  ;Сохранить состояние  датчиков пожара - этаж 1
+				                     
+ 00D4  BA 00FD			           mov dx,SensFirePort2          ;SensFirePort2 - Адрес порта ввода (этаж 2)
+ 00D7  EC			           in	al,dx	                 ;Ввод из порта	   
+ 00D8  E8 FF91			           call	VibrDelete               ;Гашение дребезга
+ 00DB  F6 D0			           not al
+ 00DD  88 44 01			           mov [si+1], al                ;Сохранить состояние  датчиков пожара - этаж 2
+						   
+ 00E0  A1 0003 R		           mov ax, Word ptr SensFireStatus
+
+ 00E3  C3			           ret
+ 00E4				SensFireInput endp
+
+ 00E4				SecureOrFireForm Proc 
+				;формирование массива охраняемых комнат и всех комнат, где пожар
+ 00E4  A1 0003 R		           mov ax,word ptr SensFireStatus        ;датчики пожара
+ 00E7  8B 16 0007 R		           mov dx,word ptr SecureRoomBtn         ;охраняемые комнаты
+ 00EB  0B C2			           or ax,dx
+ 00ED  A3 000A R		           mov word ptr SecureOrFireStatus,ax    ;сохранить
+				         
+ 00F0  C3			           ret
+ 00F1				SecureOrFireForm Endp
+
+				;формирование массива комнат где сработали датчики
+ 00F1				BreachOrFireForm Proc 
+ 00F1  A1 0003 R		           mov ax,word ptr SensFireStatus        ;датчики пожара
+ 00F4  8B 16 0005 R		           mov dx,word ptr SensBreachStatus      ;датчики взлома
+ 00F8  0B C2			           or ax,dx
+ 00FA  A3 000C R		           mov word ptr BreachOrFireStatus,ax    ;сохранить комнаты где сработали датчики
+				         
+ 00FD  C3			           ret
+ 00FE				BreachOrFireForm Endp
+
+ 00FE				SecureAndBreachForm PROC 
+ 00FE  A1 0005 R		           mov ax,word ptr SensBreachStatus      ;датчики взлома
+ 0101  8B 16 0007 R		           mov dx,word ptr SecureRoomBtn         ;комната под охраной
+ 0105  23 C2			           and ax,dx
+ 0107  A3 000E R		           mov word ptr SecureAndBreachStatus,ax ;сохранить охраняемые комнаты где сработали датчики взлома
+				           
+ 010A  C3			           ret
+ 010B				SecureAndBreachForm ENDP
+
+				;Модуль "Формирование флаг тревоги"
+ 010B				AlarmForm Proc
+ 010B  83 3E 0003 R 00		           cmp word ptr SensFireStatus, 0        ;есть пожар в любой из комнат
+ 0110  75 07			           jnz m1                                ;да
+ 0112  83 3E 000E R 00		           cmp word ptr SecureAndBreachStatus, 0 ;есть взлом в охраняемой комнате
+ 0117  74 17			           jz AlarmOff                           ;нет
+				                                                 ;да, реализовать временную задержку
+ 0119  FF 0E 0010 R		m1:        dec word ptr CountAlarm               ;декремент счетчика числа проходов
+ 011D  83 3E 0010 R 00		           cmp word ptr CountAlarm,0             ;все проходы?
+ 0122  75 11			           jnz AlarmOut                       ;нет, ничего не делать
+				                                                 ;да, задержка закончилась         
+ 0124  C7 06 0010 R 0014	           mov CountAlarm,AlarmTime              ;перезагрузить счетчик числа проходов
+ 012A  F6 16 0000 R		           not AlarmFlag                         ;Инвертировать флаг управления звонком
+ 012E  EB 05			           jmp AlarmOut                          ;На выход
+ 0130				AlarmOff:   
+ 0130  C6 06 0000 R 00		           mov AlarmFlag,0                   
+ 0135				AlarmOut:   
+ 0135  C3			           ret
+ 0136				AlarmForm Endp
+
+ 0136				SecureOrFireInd PROC 
+				;свечение индикаторов охраняемых комнат и всех комнат, где пожар
+
+ 0136  80 3E 0001 R FF		           cmp IndFlag,0FFh              
+ 013B  75 27			           jnz IndOut 
+
+ 013D  80 3E 0009 R FF		           cmp CtrlBtnStatus, 0FFh       ;нажаты кнопки "пожар" или "взлом"
+ 0142  75 20			           jnz IndOut					 ;да, выходим
+
+ 0144  A0 000A R				   mov al, SecureOrFireStatus
+ 0147  E6 EF			           out RoomIndPort1, al
+ 0149  A0 000B R		           mov al, SecureOrFireStatus+1
+ 014C  E6 DF			           out RoomIndPort2, al
+							
+ 014E  FF 0E 0012 R		           dec word ptr CountPause       ;Декремент счетчика числа проходов 
+ 0152  75 10			           jnz IndOut                    ;Больше ничего не делаем. если не все проходы
+				                                         ;все проходы
+ 0154  C6 06 0001 R 00		           mov IndFlag,0
+ 0159  C6 06 0002 R FF		           mov FadeFlag,0FFh
+ 015E  C7 06 0012 R 0014	           mov CountPause,PauseTime      ;Перезагрузить счетчик числа проходов
+ 0164				IndOut:           
+ 0164  C3			           ret
+ 0165				SecureOrFireInd ENDP
+
+ 0165				BreachOrFireFade PROC
+				;свечение индикаторов охраняемых комнат, где нет тревоги
+				;гашение индикаторов комнат, где сработали датчики
+
+ 0165  80 3E 0002 R FF		           cmp FadeFlag,0FFh             
+ 016A  75 2E			           jnz FadeOut
+				           
+ 016C  80 3E 0009 R FF		           cmp CtrlBtnStatus, 0FFh       ;нажаты кнопки "пожар" или "взлом"
+ 0171  75 27			           jnz FadeOut                   ;да
+						   
+ 0173  A1 000C R		           mov ax, word ptr BreachOrFireStatus
+ 0176  F7 D0			           not ax
+ 0178  8B 16 0007 R		           mov dx, word ptr SecureRoomBtn
+ 017C  23 C2			           and ax, dx
+
+ 017E  E6 EF			           out RoomIndPort1, al           ;выводим все охрвняемые комнаты где не сработали датчики 
+ 0180  86 E0			           xchg ah, al
+ 0182  E6 DF			           out RoomIndPort2, al
+							
+ 0184  FF 0E 0014 R		           dec word ptr CountPulse        ;Декремент счетчика числа проходов 
+ 0188  75 10			           jnz FadeOut                    ;Ничего не делаем. если не все проходы
+				                                          ;все проходы
+ 018A  C6 06 0002 R 00		           mov FadeFlag,0
+ 018F  C6 06 0001 R FF		           mov IndFlag,0FFh      
+ 0194  C7 06 0014 R 0014	           mov CountPulse,PulseTime       ;Перезагрузить счетчик числа проходов                      
+ 019A				FadeOut:  
+ 019A  C3			           ret
+ 019B				BreachOrFireFade ENDP
+
+ 019B				ControlOutput PROC 
+				;Вывод на индикаторы режима отображения  
+				 
+ 019B  A0 0009 R		           mov al, CtrlBtnStatus
+ 019E  F6 D0			           not al
+						   
+ 01A0  80 3E 0000 R FF		           cmp AlarmFlag, 0FFh                 ;Включить звонок?
+ 01A5  75 04			           jnz m1                              ;Нет, не нужно включать
+						   
+ 01A7  B2 0C			           mov dl, 0Ch
+ 01A9  0A C2			           or al, dl
+						   
+ 01AB  E6 BF			m1:        out CtrlIndPort, al
+ 01AD  C3			           ret
+ 01AE				ControlOutput ENDP
+
+ 01AE				BreachOutput Proc
+ 01AE  80 3E 0009 R FE		           cmp CtrlBtnStatus, 0FEh
+ 01B3  75 0A			           jnz m1
+ 01B5  A0 000E R		           mov al, SecureAndBreachStatus
+ 01B8  E6 EF			           out RoomIndPort1, al
+ 01BA  A0 000F R		           mov al, SecureAndBreachStatus+1
+ 01BD  E6 DF			           out RoomIndPort2, al			
+ 01BF				m1:        
+ 01BF  C3			           ret
+ 01C0				BreachOutput ENDP
+
+ 01C0				FireOutput Proc
+ 01C0  80 3E 0009 R FD		           cmp CtrlBtnStatus, 0FDh
+ 01C5  75 0A			           jnz m1
+ 01C7  A0 0003 R		           mov al, SensFireStatus
+ 01CA  E6 EF			           out RoomIndPort1, al
+ 01CC  A0 0004 R		           mov al, SensFireStatus+1
+ 01CF  E6 DF			           out RoomIndPort2, al	
+ 01D1				m1:			
+ 01D1  C3			           ret
+ 01D2				FireOutput ENDP
+				 
+ 01D2				Start:     ;системная подготовка
+ 01D2  B8 ---- R		           mov   ax,Data
+ 01D5  8E D8			           mov   ds,ax
+ 01D7  B8 ---- R		           mov   ax,Stk
+ 01DA  8E D0			           mov   ss,ax
+ 01DC  8D 26 0040 R		           lea   sp,StkTop
+				           
+				;Здесь размещается код программы
+ 01E0  E8 FE1D			           call FuncPrep                 ;Функциональная подготовка    
+ 01E3				cycle:     
+				;ввод
+ 01E3  E8 FE99			           call SecureButtonsInput       ;Ввод с кнопок постановки под охрану
+ 01E6  E8 FEB2			           call CtrlBtnInput             ;Ввод с кнопок управления
+							
+ 01E9  E8 FEBA			           call SensBreachInput          ;ввод с датчиков взлома
+ 01EC  E8 FED6			           call SensFireInput            ;ввод с датчиков пожара           
+				;обработка
+ 01EF  E8 FEF2			           call SecureOrFireForm         ;формирование массива охраняемых комнаты или комнат, в которых сработали датчики пожара
+ 01F2  E8 FEFC			           call BreachOrFireForm         ;формирование массива комнат в которых сработали датчики
+ 01F5  E8 FF06			           call SecureAndBreachForm      ;формирование массива охраняемых комнаты, в которых сработали датчики взлома
+							
+ 01F8  E8 FF10			           call AlarmForm                ;формирование флага тревоги (звонка)           
+				;вывод
+ 01FB  E8 FF38			           call SecureOrFireInd          ;свечение индикаторов охраняемых комнат и всех комнат, где пожар
+ 01FE  E8 FF64			           call BreachOrFireFade         ;пауза в свечении индикаторов комнат, где сработали датчики 
+				           
+ 0201  E8 FF97			           call ControlOutput            ;Вывод на индикаторы режима отображения и звонок
+				           
+ 0204  E8 FFA7			           call BreachOutput             ;вывод комнат при нажатии на кнопку "взлом"
+ 0207  E8 FFB6			           call FireOutput               ;вывод комнат при нажатии на кнопку "пожар"
+				           
+ 020A  EB D7			           jmp cycle                     ;зациклить
+				           
+				;В следующей строке необходимо указать смещение стартовой точки
+				           org   RomSize-16-((InitDataEnd-InitDataStart+15) and 0FFF0h)
+				           ASSUME cs:NOTHING
+ 0FF0  EA ---- 01D2 R		           jmp   Far Ptr Start
+ 0FF5				Code       ENDS
+				END		Start
+Microsoft (R) Macro Assembler Version 6.14.8444		    06/04/23 16:58:40
+Signaling.asm						     Symbols 2 - 1
+
+
+
+
+Segments and Groups:
+
+                N a m e                 Size     Length   Align   Combine Class
+
+Code . . . . . . . . . . . . . .	16 Bit	 0FF5	  Para	  Private 
+Data . . . . . . . . . . . . . .	16 Bit	 0016	  Abs	  Private 
+InitData . . . . . . . . . . . .	16 Bit	 0000	  Para	  Private 
+Stk  . . . . . . . . . . . . . .	16 Bit	 0040	  Abs	  Private 
+
+
+Procedures,  parameters and locals:
+
+                N a m e                 Type     Value    Attr
+
+AlarmForm  . . . . . . . . . . .	P Near	 010B	  Code	Length= 002B Public
+  m1 . . . . . . . . . . . . . .	L Near	 0119	  Code	
+  AlarmOff . . . . . . . . . . .	L Near	 0130	  Code	
+  AlarmOut . . . . . . . . . . .	L Near	 0135	  Code	
+BreachOrFireFade . . . . . . . .	P Near	 0165	  Code	Length= 0036 Public
+  FadeOut  . . . . . . . . . . .	L Near	 019A	  Code	
+BreachOrFireForm . . . . . . . .	P Near	 00F1	  Code	Length= 000D Public
+BreachOutput . . . . . . . . . .	P Near	 01AE	  Code	Length= 0012 Public
+  m1 . . . . . . . . . . . . . .	L Near	 01BF	  Code	
+ControlOutput  . . . . . . . . .	P Near	 019B	  Code	Length= 0013 Public
+  m1 . . . . . . . . . . . . . .	L Near	 01AB	  Code	
+CtrlBtnInput . . . . . . . . . .	P Near	 009B	  Code	Length= 000B Public
+FireOutput . . . . . . . . . . .	P Near	 01C0	  Code	Length= 0012 Public
+  m1 . . . . . . . . . . . . . .	L Near	 01D1	  Code	
+Flashing . . . . . . . . . . . .	P Near	 0049	  Code	Length= 0023 Public
+  DDelay0  . . . . . . . . . . .	L Near	 0057	  Code	
+FuncPrep . . . . . . . . . . . .	P Near	 0000	  Code	Length= 0049 Public
+SecureAndBreachForm  . . . . . .	P Near	 00FE	  Code	Length= 000D Public
+SecureButtonsInput . . . . . . .	P Near	 007F	  Code	Length= 001C Public
+SecureOrFireForm . . . . . . . .	P Near	 00E4	  Code	Length= 000D Public
+SecureOrFireInd  . . . . . . . .	P Near	 0136	  Code	Length= 002F Public
+  IndOut . . . . . . . . . . . .	L Near	 0164	  Code	
+SensBreachInput  . . . . . . . .	P Near	 00A6	  Code	Length= 001F Public
+SensFireInput  . . . . . . . . .	P Near	 00C5	  Code	Length= 001F Public
+VibrDelete . . . . . . . . . . .	P Near	 006C	  Code	Length= 0013 Public
+  vd1  . . . . . . . . . . . . .	L Near	 006C	  Code	
+  vd2  . . . . . . . . . . . . .	L Near	 0070	  Code	
+
+
+Symbols:
+
+                N a m e                 Type     Value    Attr
+
+AlarmFlag  . . . . . . . . . . .	Byte	 0000	  Data	
+AlarmTime  . . . . . . . . . . .	Number	 0014h	 
+BreachOrFireStatus . . . . . . .	Byte	 000C	  Data	
+CountAlarm . . . . . . . . . . .	Word	 0010	  Data	
+CountPause . . . . . . . . . . .	Word	 0012	  Data	
+CountPulse . . . . . . . . . . .	Word	 0014	  Data	
+CtrlBtnPort  . . . . . . . . . .	Number	 00BFh	 
+CtrlBtnStatus  . . . . . . . . .	Byte	 0009	  Data	
+CtrlIndPort  . . . . . . . . . .	Number	 00BFh	 
+FadeFlag . . . . . . . . . . . .	Byte	 0002	  Data	
+IndFlag  . . . . . . . . . . . .	Byte	 0001	  Data	
+InitDataEnd  . . . . . . . . . .	L Near	 0000	  InitData	
+InitDataStart  . . . . . . . . .	L Near	 0000	  InitData	
+NMax . . . . . . . . . . . . . .	Number	 0032h	 
+PauseTime  . . . . . . . . . . .	Number	 0014h	 
+PulseTime  . . . . . . . . . . .	Number	 0014h	 
+RomSize  . . . . . . . . . . . .	Number	 1000h	 
+RoomIndPort1 . . . . . . . . . .	Number	 00EFh	 
+RoomIndPort2 . . . . . . . . . .	Number	 00DFh	 
+SecureAndBreachStatus  . . . . .	Byte	 000E	  Data	
+SecureBtnPort1 . . . . . . . . .	Number	 00EFh	 
+SecureBtnPort2 . . . . . . . . .	Number	 00DFh	 
+SecureOrFireStatus . . . . . . .	Byte	 000A	  Data	
+SecureRoomBtn  . . . . . . . . .	Byte	 0007	  Data	
+SensBreachStatus . . . . . . . .	Byte	 0005	  Data	
+SensBrechPort1 . . . . . . . . .	Number	 00FBh	 
+SensBrechPort2 . . . . . . . . .	Number	 00F7h	 
+SensFirePort1  . . . . . . . . .	Number	 00FEh	 
+SensFirePort2  . . . . . . . . .	Number	 00FDh	 
+SensFireStatus . . . . . . . . .	Byte	 0003	  Data	
+Start  . . . . . . . . . . . . .	L Near	 01D2	  Code	
+StkTop . . . . . . . . . . . . .	Word	 0040	  Stk	
+cycle  . . . . . . . . . . . . .	L Near	 01E3	  Code	
+
+	   0 Warnings
+	   0 Errors

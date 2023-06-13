@@ -1,0 +1,6 @@
+[SOURCE]=00000001,Signaling.asm
+[ARCH]=00000000,Signaling.arh
+[ROMSIZE]=4
+[FREQ]=1000000
+[FREEPINLEVEL]=1
+[WND.asm]=(104,104,1258,534)H:\ПОМОЙКА\шарага\6 семестр\МПС\курсач\Мой курсач\курсач\Signaling.asm
